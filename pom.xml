@@ -28,5 +28,10 @@
 			<artifactId>ecj</artifactId>
 			<version>${compiler.version}</version>
 		</dependency>
+		<dependency>
+			<groupId>com.xafero.native</groupId>
+			<artifactId>natra-api</artifactId>
+			<version>0.1</version>
+		</dependency>
 	</dependencies>
 </project>

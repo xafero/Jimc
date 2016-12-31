@@ -2,7 +2,7 @@ package com.xafero.jimc.impl;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.io.StringWriter;
+import java.io.Writer;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.AbstractMap.SimpleImmutableEntry;
@@ -19,48 +19,48 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import javax.tools.Diagnostic;
-import javax.tools.DiagnosticCollector;
+import javax.tools.DiagnosticListener;
 import javax.tools.JavaCompiler;
 import javax.tools.JavaCompiler.CompilationTask;
-import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 
 import org.eclipse.jdt.internal.compiler.tool.EclipseCompiler;
 
-import com.xafero.jimc.api.IMemoryCompiler;
 import com.xafero.jimc.javac.MemJavaFileManager;
 import com.xafero.jimc.javac.MemJavaFileObject;
 import com.xafero.jimc.jvm.MemClassLoader;
+import com.xafero.jimc.util.RunUtils;
 import com.xafero.jimc.util.ThreadUtils;
+import com.xafero.natra.api.INativeParams;
+import com.xafero.natra.common.AbstractNativeTranslator;
+import com.xafero.natra.util.ErrorMessage;
 
-public class MemCompiler implements IMemoryCompiler, Closeable {
+public class MemCompiler extends AbstractNativeTranslator<Class<?>, byte[]> implements Closeable {
 
-	private final ExecutorService pool;
 	private final JavaCompiler compiler;
-	private final MemClassLoader mem;
-	private final MemJavaFileManager fmgr;
 	private final Locale loc;
 	private final Charset enc;
-	private final StandardJavaFileManager smgr;
+	private final MemClassLoader mem;
+	private final ExecutorService pool;
 
-	private DiagnosticCollector<? super JavaFileObject> diag;
-	private StringWriter out;
-
-	public MemCompiler() {
-		pool = Executors.newCachedThreadPool();
+	public MemCompiler(MemCompilerFactory factory) {
+		super(factory);
 		compiler = new EclipseCompiler();
 		loc = Locale.US;
 		enc = Charset.forName("UTF8");
-		diag = new DiagnosticCollector<>();
-		smgr = compiler.getStandardFileManager(diag, loc, enc);
 		mem = new MemClassLoader();
-		fmgr = new MemJavaFileManager(smgr, mem);
-		out = new StringWriter();
+		pool = Executors.newCachedThreadPool();
 	}
 
+	@SuppressWarnings("unchecked")
 	@Override
-	public Map<URI, Entry<Class<?>, byte[]>> compile(Map<URI, String> sources) {
+	protected Map<URI, Entry<Class<?>, byte[]>> translateImpl(INativeParams params) {
+		Map<URI, String> sources = params.getSources();
+		Writer out = params.getOutput();
+		@SuppressWarnings("rawtypes")
+		DiagnosticListener diag = params;
+		StandardJavaFileManager smgr = compiler.getStandardFileManager(diag, loc, enc);
+		MemJavaFileManager fmgr = new MemJavaFileManager(smgr, mem);
 		List<MemJavaFileObject> units = toFiles(sources);
 		final String jdk = "8";
 		Iterable<String> options = Arrays.asList("-source", jdk, "-target", jdk);
@@ -98,18 +98,13 @@ public class MemCompiler implements IMemoryCompiler, Closeable {
 	}
 
 	@Override
-	public List<Diagnostic<?>> getMessages() {
-		@SuppressWarnings({ "unchecked", "rawtypes" })
-		List<Diagnostic<?>> old = (List) diag.getDiagnostics();
-		diag = new DiagnosticCollector<>();
-		return old;
-	}
-
-	@Override
-	public String getOutput() {
-		String old = out.toString();
-		out = new StringWriter();
-		return old;
+	public Object run(Object binary, DiagnosticListener<URI> diag) {
+		try {
+			return RunUtils.run((Class<?>) binary);
+		} catch (Exception e) {
+			diag.report(new ErrorMessage(binary, e));
+			return null;
+		}
 	}
 
 	@Override
